@@ -1,63 +1,147 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import {
-  LayoutDashboard, UtensilsCrossed, Calendar, Star, ShoppingBag,
-  Bell, ChevronRight, TrendingUp, Users, Package, AlertCircle,
-  CheckCircle, Clock, X, Menu, Edit, Trash2, Eye, Plus
+  Bell,
+  Calendar,
+  ChevronRight,
+  LayoutDashboard,
+  Menu,
+  Package,
+  Plus,
+  ShoppingBag,
+  Star,
+  TrendingUp,
+  Users,
+  X,
 } from 'lucide-react';
-import { adminStats, menuItems, cafeEvents, reviews } from '../data/mockData';
+import { cafeEvents, reviews } from '../data/mockData';
+import InvoiceButton from '../components/InvoiceButton';
+import OrderStatusBadge from '../components/OrderStatusBadge';
+import StockBadge from '../components/StockBadge';
+import { useCafe } from '../context/CafeContext';
+import type { OrderStatus } from '../types/cafe';
+import { getStockStatus } from '../utils/cafe';
 
-type AdminView = 'dashboard' | 'bookings' | 'menu' | 'stock' | 'reviews' | 'events' | 'analytics';
+type AdminView =
+  | 'dashboard'
+  | 'orders'
+  | 'menu'
+  | 'stock'
+  | 'reports'
+  | 'reviews'
+  | 'events';
 
 const navItems: { id: AdminView; label: string; icon: React.ReactNode }[] = [
-  { id: 'dashboard', label: 'Dashboard', icon: <LayoutDashboard className="w-4 h-4" /> },
-  { id: 'bookings', label: 'Bookings', icon: <Calendar className="w-4 h-4" /> },
-  { id: 'menu', label: 'Menu Items', icon: <UtensilsCrossed className="w-4 h-4" /> },
-  { id: 'stock', label: 'Stock', icon: <Package className="w-4 h-4" /> },
-  { id: 'reviews', label: 'Reviews', icon: <Star className="w-4 h-4" /> },
-  { id: 'events', label: 'Events', icon: <ShoppingBag className="w-4 h-4" /> },
-  { id: 'analytics', label: 'Analytics', icon: <TrendingUp className="w-4 h-4" /> },
+  { id: 'dashboard', label: 'Dashboard', icon: <LayoutDashboard className="h-4 w-4" /> },
+  { id: 'orders', label: 'Orders', icon: <ShoppingBag className="h-4 w-4" /> },
+  { id: 'menu', label: 'Menu Items', icon: <Calendar className="h-4 w-4" /> },
+  { id: 'stock', label: 'Inventory', icon: <Package className="h-4 w-4" /> },
+  { id: 'reports', label: 'Reports', icon: <TrendingUp className="h-4 w-4" /> },
+  { id: 'reviews', label: 'Reviews', icon: <Star className="h-4 w-4" /> },
+  { id: 'events', label: 'Events', icon: <Users className="h-4 w-4" /> },
 ];
 
-const statusColors: Record<string, string> = {
-  confirmed: 'text-emerald-600 bg-emerald-50 border-emerald-200',
-  pending: 'text-amber-600 bg-amber-50 border-amber-200',
-  completed: 'text-blue-600 bg-blue-50 border-blue-200',
-  cancelled: 'text-red-600 bg-red-50 border-red-200',
+const initialDraft = {
+  name: '',
+  description: '',
+  price: 0,
+  category: 'Coffee',
+  image: '',
+  stockQuantity: 0,
 };
 
-const weekDays = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
-
 export default function Admin() {
+  const {
+    menu,
+    orders,
+    stockHistory,
+    orderStatuses,
+    updateOrderStatus,
+    updateStockQuantity,
+    upsertMenuItem,
+    removeMenuItem,
+    totalRevenue,
+    pendingOrdersCount,
+    completedOrdersCount,
+    reportSummaries,
+    bestSellingProducts,
+    lowStockItems,
+  } = useCafe();
   const [activeView, setActiveView] = useState<AdminView>('dashboard');
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [stockStatuses, setStockStatuses] = useState<Record<string, string>>(
-    Object.fromEntries(menuItems.map((m) => [m.id, m.stock]))
-  );
+  const [editingItemId, setEditingItemId] = useState<string | null>(null);
+  const [draftItem, setDraftItem] = useState(initialDraft);
 
-  const maxRevenue = Math.max(...adminStats.weeklyRevenue);
+  const dashboardInventoryStatus = useMemo(() => {
+    const outCount = menu.filter((item) => item.stockQuantity === 0).length;
+    return `${lowStockItems.length} low · ${outCount} out`;
+  }, [lowStockItems.length, menu]);
+
+  const topPendingOrders = orders.slice(0, 6);
+
+  const startEdit = (itemId: string) => {
+    const item = menu.find((menuItem) => menuItem.id === itemId);
+    if (!item) {
+      return;
+    }
+
+    setEditingItemId(itemId);
+    setDraftItem({
+      name: item.name,
+      description: item.description,
+      price: item.price,
+      category: item.category,
+      image: item.image,
+      stockQuantity: item.stockQuantity,
+    });
+  };
+
+  const resetDraft = () => {
+    setEditingItemId(null);
+    setDraftItem(initialDraft);
+  };
+
+  const saveMenuItem = () => {
+    if (!draftItem.name || !draftItem.description || !draftItem.image) {
+      return;
+    }
+
+    upsertMenuItem({
+      id: editingItemId ?? undefined,
+      ...draftItem,
+      price: Number(draftItem.price),
+      stockQuantity: Number(draftItem.stockQuantity),
+    });
+    resetDraft();
+  };
 
   return (
-    <div className="min-h-screen bg-[#f5f0eb] flex">
-      {/* Sidebar */}
-      <aside className={`fixed lg:static inset-y-0 left-0 z-50 w-60 bg-[#1e140a] flex flex-col transform transition-transform lg:transform-none ${sidebarOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'}`}>
-        <div className="p-5 border-b border-[#3c2a15]">
+    <div className="flex min-h-screen bg-[#f5f0eb]">
+      <aside
+        className={`fixed inset-y-0 left-0 z-50 flex w-60 flex-col bg-[#1e140a] transition-transform lg:static lg:translate-x-0 ${
+          sidebarOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'
+        }`}
+      >
+        <div className="border-b border-[#3c2a15] p-5">
           <div className="flex items-center gap-2">
-            <div className="w-7 h-7 bg-[#8d5930] rounded-full flex items-center justify-center">
-              <span className="text-[#fdf8f3] text-xs font-bold">A</span>
+            <div className="flex h-7 w-7 items-center justify-center rounded-full bg-[#8d5930]">
+              <span className="text-xs font-bold text-[#fdf8f3]">A</span>
             </div>
             <div>
-              <p className="text-[#fdf8f3] font-semibold text-sm font-lato">Arambh Café</p>
-              <p className="text-[#7a5838] text-xs font-lato">Admin Panel</p>
+              <p className="font-lato text-sm font-semibold text-[#fdf8f3]">Arambh Cafe</p>
+              <p className="font-lato text-xs text-[#7a5838]">Admin Panel</p>
             </div>
           </div>
         </div>
 
-        <nav className="flex-1 py-4 overflow-y-auto">
+        <nav className="flex-1 overflow-y-auto py-4">
           {navItems.map((item) => (
             <button
               key={item.id}
-              onClick={() => { setActiveView(item.id); setSidebarOpen(false); }}
-              className={`w-full flex items-center gap-3 px-5 py-3 text-sm transition-colors font-lato ${
+              onClick={() => {
+                setActiveView(item.id);
+                setSidebarOpen(false);
+              }}
+              className={`flex w-full items-center gap-3 px-5 py-3 font-lato text-sm transition-colors ${
                 activeView === item.id
                   ? 'bg-[#8d5930] text-[#fdf8f3]'
                   : 'text-[#c8a87a] hover:bg-[#3c2a15] hover:text-[#fdf8f3]'
@@ -65,319 +149,232 @@ export default function Admin() {
             >
               {item.icon}
               {item.label}
-              {activeView === item.id && <ChevronRight className="w-3.5 h-3.5 ml-auto" />}
+              {activeView === item.id && <ChevronRight className="ml-auto h-3.5 w-3.5" />}
             </button>
           ))}
         </nav>
 
-        <div className="p-4 border-t border-[#3c2a15]">
-          <a href="/" className="block text-xs text-[#7a5838] hover:text-[#c8a87a] font-lato text-center transition-colors">
-            ← Back to Website
+        <div className="border-t border-[#3c2a15] p-4">
+          <a
+            href="/"
+            className="block text-center font-lato text-xs text-[#7a5838] transition-colors hover:text-[#c8a87a]"
+          >
+            Back to Website
           </a>
         </div>
       </aside>
 
-      {/* Overlay for mobile */}
       {sidebarOpen && (
-        <div className="fixed inset-0 z-40 bg-black/40 lg:hidden" onClick={() => setSidebarOpen(false)} />
+        <div
+          className="fixed inset-0 z-40 bg-black/40 lg:hidden"
+          onClick={() => setSidebarOpen(false)}
+        />
       )}
 
-      {/* Main Content */}
-      <div className="flex-1 flex flex-col min-w-0">
-        {/* Top Bar */}
-        <header className="bg-white border-b border-[#e8d9cc] px-6 py-4 flex items-center justify-between sticky top-0 z-30">
+      <div className="flex min-w-0 flex-1 flex-col">
+        <header className="sticky top-0 z-30 flex items-center justify-between border-b border-[#e8d9cc] bg-white px-6 py-4">
           <div className="flex items-center gap-3">
-            <button onClick={() => setSidebarOpen(true)} className="lg:hidden text-[#8d5930]">
-              <Menu className="w-5 h-5" />
+            <button onClick={() => setSidebarOpen(true)} className="text-[#8d5930] lg:hidden">
+              <Menu className="h-5 w-5" />
             </button>
             <div>
-              <h1 className="font-playfair font-semibold text-[#3c2a15] text-lg capitalize">{activeView}</h1>
-              <p className="text-xs text-[#7a5838] font-lato">
-                {new Date().toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}
+              <h1 className="font-playfair text-lg font-semibold capitalize text-[#3c2a15]">
+                {activeView}
+              </h1>
+              <p className="font-lato text-xs text-[#7a5838]">
+                {new Date().toLocaleDateString('en-IN', {
+                  weekday: 'long',
+                  day: 'numeric',
+                  month: 'long',
+                  year: 'numeric',
+                })}
               </p>
             </div>
           </div>
           <div className="flex items-center gap-3">
-            <button className="relative p-2 text-[#8d5930] hover:bg-[#f9edd9] rounded-full transition-colors">
-              <Bell className="w-5 h-5" />
-              <span className="absolute top-1 right-1 w-2 h-2 bg-red-500 rounded-full" />
+            <button className="relative rounded-full p-2 text-[#8d5930] transition-colors hover:bg-[#f9edd9]">
+              <Bell className="h-5 w-5" />
+              <span className="absolute right-1 top-1 h-2 w-2 rounded-full bg-red-500" />
             </button>
-            <div className="w-9 h-9 bg-[#8d5930] rounded-full flex items-center justify-center text-[#fdf8f3] font-semibold text-sm">
+            <div className="flex h-9 w-9 items-center justify-center rounded-full bg-[#8d5930] text-sm font-semibold text-[#fdf8f3]">
               AD
             </div>
           </div>
         </header>
 
-        <main className="flex-1 p-5 lg:p-6 overflow-y-auto">
-
-          {/* ── DASHBOARD ──────────────────────────────────────── */}
+        <main className="flex-1 overflow-y-auto p-5 lg:p-6">
           {activeView === 'dashboard' && (
             <div className="space-y-6">
-              {/* Stats Cards */}
-              <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+              <div className="grid grid-cols-2 gap-4 lg:grid-cols-5">
                 {[
-                  { label: "Today's Revenue", value: `₹${adminStats.todayRevenue.toLocaleString('en-IN')}`, icon: <TrendingUp className="w-5 h-5" />, color: 'text-emerald-600 bg-emerald-50', change: '+12.4%' },
-                  { label: "Today's Orders", value: adminStats.todayOrders, icon: <ShoppingBag className="w-5 h-5" />, color: 'text-blue-600 bg-blue-50', change: '+8 since yesterday' },
-                  { label: 'Active Bookings', value: adminStats.activeBookings, icon: <Calendar className="w-5 h-5" />, color: 'text-violet-600 bg-violet-50', change: '3 pending review' },
-                  { label: 'Total Customers', value: adminStats.totalCustomers.toLocaleString('en-IN'), icon: <Users className="w-5 h-5" />, color: 'text-[#8d5930] bg-[#f9edd9]', change: '+24 this week' },
-                ].map((stat) => (
-                  <div key={stat.label} className="bg-white rounded-2xl p-5 border border-[#e8d9cc]">
-                    <div className={`w-10 h-10 rounded-xl flex items-center justify-center mb-3 ${stat.color}`}>
-                      {stat.icon}
+                  {
+                    label: 'Total Orders',
+                    value: orders.length,
+                    color: 'text-blue-600 bg-blue-50',
+                    icon: <ShoppingBag className="h-5 w-5" />,
+                  },
+                  {
+                    label: 'Pending Orders',
+                    value: pendingOrdersCount,
+                    color: 'text-amber-600 bg-amber-50',
+                    icon: <Calendar className="h-5 w-5" />,
+                  },
+                  {
+                    label: 'Completed Orders',
+                    value: completedOrdersCount,
+                    color: 'text-emerald-600 bg-emerald-50',
+                    icon: <Users className="h-5 w-5" />,
+                  },
+                  {
+                    label: 'Revenue',
+                    value: `₹${Math.round(totalRevenue).toLocaleString('en-IN')}`,
+                    color: 'text-[#8d5930] bg-[#f9edd9]',
+                    icon: <TrendingUp className="h-5 w-5" />,
+                  },
+                  {
+                    label: 'Inventory Status',
+                    value: dashboardInventoryStatus,
+                    color: 'text-violet-600 bg-violet-50',
+                    icon: <Package className="h-5 w-5" />,
+                  },
+                ].map((card) => (
+                  <div key={card.label} className="rounded-2xl border border-[#e8d9cc] bg-white p-5">
+                    <div className={`mb-3 flex h-10 w-10 items-center justify-center rounded-xl ${card.color}`}>
+                      {card.icon}
                     </div>
-                    <p className="text-2xl font-bold font-playfair text-[#3c2a15]">{stat.value}</p>
-                    <p className="text-xs text-[#7a5838] font-lato mt-0.5">{stat.label}</p>
-                    <p className="text-xs text-emerald-600 font-lato mt-1">{stat.change}</p>
+                    <p className="font-playfair text-2xl font-bold text-[#3c2a15]">{card.value}</p>
+                    <p className="mt-0.5 font-lato text-xs text-[#7a5838]">{card.label}</p>
                   </div>
                 ))}
               </div>
 
-              <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                {/* Revenue Chart */}
-                <div className="lg:col-span-2 bg-white rounded-2xl p-5 border border-[#e8d9cc]">
-                  <h2 className="font-playfair font-semibold text-[#3c2a15] mb-4">Weekly Revenue</h2>
-                  <div className="flex items-end gap-2 h-36">
-                    {adminStats.weeklyRevenue.map((rev, i) => (
-                      <div key={i} className="flex-1 flex flex-col items-center gap-1">
-                        <span className="text-xs text-[#7a5838] font-lato">₹{Math.round(rev / 1000)}k</span>
-                        <div
-                          className={`w-full rounded-t-lg transition-all ${i === 6 ? 'bg-[#8d5930]' : 'bg-[#e8d9cc]'}`}
-                          style={{ height: `${(rev / maxRevenue) * 100}px` }}
-                        />
-                        <span className="text-xs text-[#7a5838] font-lato">{weekDays[i]}</span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-
-                {/* Top Items */}
-                <div className="bg-white rounded-2xl p-5 border border-[#e8d9cc]">
-                  <h2 className="font-playfair font-semibold text-[#3c2a15] mb-4">Top Selling Items</h2>
+              <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
+                <div className="rounded-2xl border border-[#e8d9cc] bg-white p-5 lg:col-span-2">
+                  <h2 className="mb-4 font-playfair font-semibold text-[#3c2a15]">Order Queue</h2>
                   <div className="space-y-3">
-                    {adminStats.topItems.map((item, i) => (
-                      <div key={item.name} className="flex items-center gap-3">
-                        <span className="w-6 h-6 bg-[#f9edd9] rounded-full flex items-center justify-center text-xs font-semibold text-[#8d5930] flex-shrink-0">
-                          {i + 1}
-                        </span>
-                        <div className="flex-1 min-w-0">
-                          <p className="text-xs font-medium text-[#3c2a15] truncate font-lato">{item.name}</p>
-                          <p className="text-xs text-[#7a5838] font-lato">{item.orders} orders</p>
-                        </div>
-                        <span className="text-xs font-semibold text-[#8d5930] font-lato">₹{item.revenue.toLocaleString('en-IN')}</span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                {/* Recent Bookings */}
-                <div className="bg-white rounded-2xl p-5 border border-[#e8d9cc]">
-                  <h2 className="font-playfair font-semibold text-[#3c2a15] mb-4">Today's Bookings</h2>
-                  <div className="space-y-3">
-                    {adminStats.recentBookings.map((booking) => (
-                      <div key={booking.id} className="flex items-center justify-between py-2 border-b border-[#f0e6d3] last:border-0">
-                        <div className="flex items-center gap-3">
-                          <div className="w-8 h-8 bg-[#f9edd9] rounded-lg flex items-center justify-center text-xs font-semibold text-[#8d5930]">
-                            {booking.name.split(' ').map(n => n[0]).join('')}
-                          </div>
-                          <div>
-                            <p className="text-xs font-medium text-[#3c2a15] font-lato">{booking.name}</p>
-                            <p className="text-xs text-[#7a5838] font-lato">{booking.type} · {booking.people} pax · {booking.time}</p>
-                          </div>
-                        </div>
-                        <span className={`text-xs px-2.5 py-1 rounded-full border font-lato ${statusColors[booking.status]}`}>
-                          {booking.status}
-                        </span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-
-                {/* Notifications */}
-                <div className="bg-white rounded-2xl p-5 border border-[#e8d9cc]">
-                  <div className="flex items-center justify-between mb-4">
-                    <h2 className="font-playfair font-semibold text-[#3c2a15]">Notifications</h2>
-                    <span className="text-xs bg-red-50 text-red-600 px-2 py-0.5 rounded-full border border-red-200 font-lato">{adminStats.notifications.length} new</span>
-                  </div>
-                  <div className="space-y-3">
-                    {adminStats.notifications.map((notif) => (
-                      <div key={notif.id} className={`flex items-start gap-3 p-3 rounded-xl ${
-                        notif.type === 'booking' ? 'bg-blue-50' :
-                        notif.type === 'stock' ? 'bg-amber-50' :
-                        notif.type === 'review' ? 'bg-emerald-50' : 'bg-violet-50'
-                      }`}>
-                        {notif.type === 'booking' ? <Calendar className="w-4 h-4 text-blue-600 mt-0.5 flex-shrink-0" /> :
-                         notif.type === 'stock' ? <AlertCircle className="w-4 h-4 text-amber-600 mt-0.5 flex-shrink-0" /> :
-                         notif.type === 'review' ? <Star className="w-4 h-4 text-emerald-600 mt-0.5 flex-shrink-0" /> :
-                         <Bell className="w-4 h-4 text-violet-600 mt-0.5 flex-shrink-0" />}
+                    {topPendingOrders.map((order) => (
+                      <div
+                        key={order.id}
+                        className="flex flex-col gap-3 rounded-xl border border-[#f0e6d3] p-4 sm:flex-row sm:items-center sm:justify-between"
+                      >
                         <div>
-                          <p className="text-xs text-[#3c2a15] font-lato leading-relaxed">{notif.message}</p>
-                          <p className="text-xs text-[#7a5838] font-lato mt-0.5">{notif.time}</p>
+                          <p className="font-lato text-sm font-semibold text-[#3c2a15]">
+                            {order.orderNumber} · {order.customerName}
+                          </p>
+                          <p className="font-lato text-xs text-[#7a5838]">
+                            {order.items.length} items · ₹{order.total.toLocaleString('en-IN')}
+                          </p>
+                        </div>
+                        <div className="flex items-center gap-3">
+                          <OrderStatusBadge status={order.status} />
+                          <select
+                            value={order.status}
+                            onChange={(event) =>
+                              updateOrderStatus(order.id, event.target.value as OrderStatus)
+                            }
+                            className="rounded-lg border border-[#e8d9cc] bg-[#fdf8f3] px-3 py-2 font-lato text-xs text-[#3c2a15] focus:border-[#8d5930] focus:outline-none"
+                          >
+                            {orderStatuses.map((status) => (
+                              <option key={status} value={status}>
+                                {status}
+                              </option>
+                            ))}
+                          </select>
                         </div>
                       </div>
                     ))}
                   </div>
                 </div>
-              </div>
-            </div>
-          )}
 
-          {/* ── BOOKINGS ──────────────────────────────────────── */}
-          {activeView === 'bookings' && (
-            <div className="space-y-4">
-              <div className="flex gap-2 flex-wrap">
-                {['All', 'Pending', 'Confirmed', 'Completed', 'Cancelled'].map((f) => (
-                  <button key={f} className="px-4 py-2 bg-white border border-[#e8d9cc] rounded-full text-sm text-[#5e3921] hover:border-[#8d5930] font-lato transition-colors">
-                    {f}
-                  </button>
-                ))}
-              </div>
-              <div className="bg-white rounded-2xl border border-[#e8d9cc] overflow-hidden">
-                <div className="overflow-x-auto">
-                  <table className="w-full text-sm font-lato">
-                    <thead>
-                      <tr className="border-b border-[#f0e6d3] bg-[#fdf8f3]">
-                        <th className="text-left p-4 text-xs font-semibold text-[#7a5838] uppercase tracking-wide">Customer</th>
-                        <th className="text-left p-4 text-xs font-semibold text-[#7a5838] uppercase tracking-wide">Type</th>
-                        <th className="text-left p-4 text-xs font-semibold text-[#7a5838] uppercase tracking-wide">Date & Time</th>
-                        <th className="text-left p-4 text-xs font-semibold text-[#7a5838] uppercase tracking-wide">People</th>
-                        <th className="text-left p-4 text-xs font-semibold text-[#7a5838] uppercase tracking-wide">Status</th>
-                        <th className="text-left p-4 text-xs font-semibold text-[#7a5838] uppercase tracking-wide">Actions</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {adminStats.recentBookings.map((booking, i) => (
-                        <tr key={booking.id} className={`border-b border-[#f0e6d3] last:border-0 ${i % 2 === 0 ? '' : 'bg-[#fdf8f3]/40'}`}>
-                          <td className="p-4">
-                            <div className="flex items-center gap-2">
-                              <div className="w-7 h-7 bg-[#8d5930] rounded-full flex items-center justify-center text-[#fdf8f3] text-xs font-semibold">
-                                {booking.name.split(' ').map(n => n[0]).join('')}
-                              </div>
-                              <span className="font-medium text-[#3c2a15] text-xs">{booking.name}</span>
-                            </div>
-                          </td>
-                          <td className="p-4 text-xs text-[#5e3921]">{booking.type}</td>
-                          <td className="p-4 text-xs text-[#5e3921]">Today · {booking.time}</td>
-                          <td className="p-4 text-xs text-[#5e3921]">{booking.people}</td>
-                          <td className="p-4">
-                            <span className={`text-xs px-2.5 py-1 rounded-full border ${statusColors[booking.status]}`}>
-                              {booking.status}
-                            </span>
-                          </td>
-                          <td className="p-4">
-                            <div className="flex gap-1.5">
-                              <button className="p-1.5 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors">
-                                <Eye className="w-3.5 h-3.5" />
-                              </button>
-                              {booking.status === 'pending' && (
-                                <>
-                                  <button className="p-1.5 text-emerald-600 hover:bg-emerald-50 rounded-lg transition-colors">
-                                    <CheckCircle className="w-3.5 h-3.5" />
-                                  </button>
-                                  <button className="p-1.5 text-red-500 hover:bg-red-50 rounded-lg transition-colors">
-                                    <X className="w-3.5 h-3.5" />
-                                  </button>
-                                </>
-                              )}
-                            </div>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
+                <div className="rounded-2xl border border-[#e8d9cc] bg-white p-5">
+                  <h2 className="mb-4 font-playfair font-semibold text-[#3c2a15]">Low Stock</h2>
+                  <div className="space-y-3">
+                    {lowStockItems.length === 0 ? (
+                      <p className="font-lato text-sm text-[#7a5838]">Everything is stocked well.</p>
+                    ) : (
+                      lowStockItems.map((item) => (
+                        <div key={item.id} className="rounded-xl bg-[#fdf8f3] p-3">
+                          <div className="mb-2 flex items-center justify-between gap-3">
+                            <p className="font-lato text-sm font-medium text-[#3c2a15]">{item.name}</p>
+                            <StockBadge status={getStockStatus(item.stockQuantity)} />
+                          </div>
+                          <p className="font-lato text-xs text-[#7a5838]">
+                            {item.stockQuantity} units remaining
+                          </p>
+                        </div>
+                      ))
+                    )}
+                  </div>
                 </div>
               </div>
             </div>
           )}
 
-          {/* ── MENU ──────────────────────────────────────────── */}
-          {activeView === 'menu' && (
-            <div className="space-y-4">
-              <div className="flex items-center justify-between">
-                <p className="text-sm text-[#7a5838] font-lato">{menuItems.length} items in menu</p>
-                <button className="flex items-center gap-2 bg-[#8d5930] text-[#fdf8f3] px-4 py-2 rounded-full text-sm font-medium font-lato hover:bg-[#744728] transition-colors">
-                  <Plus className="w-4 h-4" /> Add Item
-                </button>
-              </div>
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                {menuItems.map((item) => (
-                  <div key={item.id} className="bg-white rounded-2xl overflow-hidden border border-[#e8d9cc]">
-                    <div className="h-36 overflow-hidden relative">
-                      <img src={item.image} alt={item.name} className="w-full h-full object-cover" />
-                      <div className="absolute inset-0 bg-gradient-to-t from-black/30 to-transparent" />
-                      <span className={`absolute top-2 right-2 text-xs px-2 py-0.5 rounded-full font-lato font-medium border ${
-                        item.stock === 'available' ? 'bg-emerald-100 text-emerald-700 border-emerald-200' :
-                        item.stock === 'low' ? 'bg-amber-100 text-amber-700 border-amber-200' :
-                        'bg-red-100 text-red-600 border-red-200'
-                      }`}>
-                        {item.stock}
-                      </span>
-                    </div>
-                    <div className="p-4">
-                      <div className="flex items-start justify-between mb-1">
-                        <p className="font-semibold text-[#3c2a15] text-sm font-lato">{item.name}</p>
-                        <span className="text-[#8d5930] font-bold text-sm font-lato">₹{item.price}</span>
-                      </div>
-                      <p className="text-xs text-[#8d5930] font-lato mb-2">{item.category}</p>
-                      <div className="flex gap-2">
-                        <button className="flex-1 flex items-center justify-center gap-1 py-1.5 border border-[#e8d9cc] rounded-lg text-xs text-[#5e3921] hover:border-[#8d5930] font-lato transition-colors">
-                          <Edit className="w-3 h-3" /> Edit
-                        </button>
-                        <button className="flex-1 flex items-center justify-center gap-1 py-1.5 border border-red-100 rounded-lg text-xs text-red-500 hover:bg-red-50 font-lato transition-colors">
-                          <Trash2 className="w-3 h-3" /> Remove
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* ── STOCK ──────────────────────────────────────────── */}
-          {activeView === 'stock' && (
-            <div className="bg-white rounded-2xl border border-[#e8d9cc] overflow-hidden">
-              <div className="p-5 border-b border-[#f0e6d3] flex items-center justify-between">
-                <h2 className="font-playfair font-semibold text-[#3c2a15]">Stock Management</h2>
-                <span className="text-xs bg-amber-50 text-amber-700 px-3 py-1 rounded-full border border-amber-200 font-lato">
-                  {Object.values(stockStatuses).filter(s => s === 'low').length} items low
-                </span>
+          {activeView === 'orders' && (
+            <div className="rounded-2xl border border-[#e8d9cc] bg-white">
+              <div className="border-b border-[#f0e6d3] p-5">
+                <h2 className="font-playfair font-semibold text-[#3c2a15]">Order Management</h2>
+                <p className="mt-1 font-lato text-sm text-[#7a5838]">
+                  Track status, review bills, and monitor every order.
+                </p>
               </div>
               <div className="overflow-x-auto">
-                <table className="w-full text-sm font-lato">
+                <table className="w-full font-lato text-sm">
                   <thead>
-                    <tr className="border-b border-[#f0e6d3] bg-[#fdf8f3]">
-                      <th className="text-left p-4 text-xs font-semibold text-[#7a5838] uppercase">Item</th>
-                      <th className="text-left p-4 text-xs font-semibold text-[#7a5838] uppercase">Category</th>
-                      <th className="text-left p-4 text-xs font-semibold text-[#7a5838] uppercase">Current Status</th>
-                      <th className="text-left p-4 text-xs font-semibold text-[#7a5838] uppercase">Update</th>
+                    <tr className="bg-[#fdf8f3] text-left text-xs uppercase tracking-wide text-[#7a5838]">
+                      <th className="p-4">Order</th>
+                      <th className="p-4">Customer</th>
+                      <th className="p-4">Items</th>
+                      <th className="p-4">Amount</th>
+                      <th className="p-4">Status</th>
+                      <th className="p-4">Invoice</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {menuItems.map((item) => (
-                      <tr key={item.id} className="border-b border-[#f0e6d3] last:border-0 hover:bg-[#fdf8f3]/40">
-                        <td className="p-4 font-medium text-[#3c2a15] text-xs">{item.name}</td>
-                        <td className="p-4 text-xs text-[#5e3921]">{item.category}</td>
+                    {orders.map((order) => (
+                      <tr key={order.id} className="border-t border-[#f0e6d3] align-top">
                         <td className="p-4">
-                          <span className={`text-xs px-2.5 py-1 rounded-full border font-lato ${
-                            stockStatuses[item.id] === 'available' ? 'bg-emerald-50 text-emerald-700 border-emerald-200' :
-                            stockStatuses[item.id] === 'low' ? 'bg-amber-50 text-amber-700 border-amber-200' :
-                            'bg-red-50 text-red-600 border-red-200'
-                          }`}>
-                            {stockStatuses[item.id]}
-                          </span>
+                          <p className="font-medium text-[#3c2a15]">{order.orderNumber}</p>
+                          <p className="text-xs text-[#7a5838]">
+                            {new Date(order.createdAt).toLocaleString('en-IN')}
+                          </p>
                         </td>
                         <td className="p-4">
-                          <select
-                            value={stockStatuses[item.id]}
-                            onChange={(e) => setStockStatuses({ ...stockStatuses, [item.id]: e.target.value })}
-                            className="text-xs border border-[#e8d9cc] rounded-lg px-2 py-1.5 text-[#3c2a15] focus:outline-none focus:border-[#8d5930] cursor-pointer bg-[#fdf8f3]"
-                          >
-                            <option value="available">Available</option>
-                            <option value="low">Low Stock</option>
-                            <option value="out">Out of Stock</option>
-                          </select>
+                          <p className="text-[#3c2a15]">{order.customerName}</p>
+                          <p className="text-xs text-[#7a5838]">{order.customerPhone}</p>
+                        </td>
+                        <td className="p-4">
+                          <div className="space-y-1">
+                            {order.items.map((item) => (
+                              <p key={`${order.id}-${item.itemId}`} className="text-xs text-[#5e3921]">
+                                {item.name} × {item.quantity}
+                              </p>
+                            ))}
+                          </div>
+                        </td>
+                        <td className="p-4 font-semibold text-[#8d5930]">
+                          ₹{order.total.toLocaleString('en-IN')}
+                        </td>
+                        <td className="p-4">
+                          <div className="space-y-2">
+                            <OrderStatusBadge status={order.status} />
+                            <select
+                              value={order.status}
+                              onChange={(event) =>
+                                updateOrderStatus(order.id, event.target.value as OrderStatus)
+                              }
+                              className="block rounded-lg border border-[#e8d9cc] bg-[#fdf8f3] px-3 py-2 text-xs text-[#3c2a15] focus:border-[#8d5930] focus:outline-none"
+                            >
+                              {orderStatuses.map((status) => (
+                                <option key={status} value={status}>
+                                  {status}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+                        </td>
+                        <td className="p-4">
+                          <InvoiceButton order={order} />
                         </td>
                       </tr>
                     ))}
@@ -387,158 +384,310 @@ export default function Admin() {
             </div>
           )}
 
-          {/* ── REVIEWS ──────────────────────────────────────────── */}
-          {activeView === 'reviews' && (
-            <div className="space-y-4">
-              <div className="flex items-center gap-3 flex-wrap">
-                <span className="text-xs bg-amber-50 text-amber-700 px-3 py-1.5 rounded-full border border-amber-200 font-lato">
-                  {adminStats.pendingReviews} pending moderation
-                </span>
-              </div>
-              {reviews.map((review) => (
-                <div key={review.id} className="bg-white rounded-2xl p-5 border border-[#e8d9cc]">
-                  <div className="flex items-start justify-between gap-4">
-                    <div className="flex items-center gap-3">
-                      <div className="w-9 h-9 bg-[#8d5930] rounded-full flex items-center justify-center text-[#fdf8f3] text-xs font-semibold">
-                        {review.avatar}
-                      </div>
-                      <div>
-                        <p className="text-sm font-medium text-[#3c2a15] font-lato">{review.name}</p>
-                        <div className="flex items-center gap-2">
-                          {Array.from({ length: review.rating }).map((_, i) => (
-                            <span key={i} className="text-[#c8802e] text-xs">★</span>
-                          ))}
-                          <span className="text-xs text-[#7a5838] font-lato">{review.category}</span>
-                        </div>
-                      </div>
-                    </div>
-                    <div className="flex gap-2">
-                      <button className="p-2 text-emerald-600 hover:bg-emerald-50 rounded-lg transition-colors">
-                        <CheckCircle className="w-4 h-4" />
-                      </button>
-                      <button className="p-2 text-red-500 hover:bg-red-50 rounded-lg transition-colors">
-                        <Trash2 className="w-4 h-4" />
-                      </button>
-                    </div>
-                  </div>
-                  <p className="text-sm text-[#5e3921] font-lato mt-3 leading-relaxed line-clamp-2">{review.comment}</p>
-                  <p className="text-xs text-[#c8a87a] font-lato mt-2">{new Date(review.date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}</p>
-                </div>
-              ))}
-            </div>
-          )}
-
-          {/* ── EVENTS ──────────────────────────────────────────── */}
-          {activeView === 'events' && (
-            <div className="space-y-4">
-              <div className="flex items-center justify-between">
-                <p className="text-sm text-[#7a5838] font-lato">{cafeEvents.length} upcoming events</p>
-                <button className="flex items-center gap-2 bg-[#8d5930] text-[#fdf8f3] px-4 py-2 rounded-full text-sm font-medium font-lato hover:bg-[#744728] transition-colors">
-                  <Plus className="w-4 h-4" /> Create Event
-                </button>
-              </div>
-              {cafeEvents.map((event) => (
-                <div key={event.id} className="bg-white rounded-2xl p-5 border border-[#e8d9cc] flex flex-col sm:flex-row sm:items-center gap-4">
-                  <div className="w-16 h-16 rounded-xl overflow-hidden flex-shrink-0">
-                    <img src={event.image} alt={event.title} className="w-full h-full object-cover" />
-                  </div>
-                  <div className="flex-1">
-                    <div className="flex items-center gap-2 flex-wrap mb-1">
-                      <h3 className="font-semibold text-[#3c2a15] font-lato text-sm">{event.title}</h3>
-                      <span className="text-xs bg-[#f9edd9] text-[#8d5930] px-2 py-0.5 rounded-full font-lato">{event.category}</span>
-                    </div>
-                    <div className="flex items-center gap-4 text-xs text-[#7a5838] font-lato">
-                      <span className="flex items-center gap-1"><Calendar className="w-3 h-3" /> {event.date}</span>
-                      <span className="flex items-center gap-1"><Clock className="w-3 h-3" /> {event.time}</span>
-                      <span className="flex items-center gap-1"><Users className="w-3 h-3" /> {event.seats - event.seatsLeft}/{event.seats} seats</span>
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <button className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors">
-                      <Edit className="w-4 h-4" />
-                    </button>
-                    <button className="p-2 text-red-500 hover:bg-red-50 rounded-lg transition-colors">
-                      <Trash2 className="w-4 h-4" />
-                    </button>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-
-          {/* ── ANALYTICS ──────────────────────────────────────── */}
-          {activeView === 'analytics' && (
+          {activeView === 'menu' && (
             <div className="space-y-6">
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                {[
-                  { label: 'This Week', value: `₹${adminStats.weeklyRevenue.reduce((a, b) => a + b, 0).toLocaleString('en-IN')}`, change: '↑ 18% vs last week' },
-                  { label: 'Avg Order Value', value: `₹${Math.round(adminStats.todayRevenue / adminStats.todayOrders)}`, change: '↑ 5% vs last week' },
-                  { label: 'Repeat Customers', value: '68%', change: 'High loyalty rate' },
-                ].map((card) => (
-                  <div key={card.label} className="bg-white rounded-2xl p-5 border border-[#e8d9cc]">
-                    <p className="text-xs text-[#7a5838] font-lato mb-1">{card.label}</p>
-                    <p className="text-3xl font-playfair font-bold text-[#3c2a15]">{card.value}</p>
-                    <p className="text-xs text-emerald-600 font-lato mt-1">{card.change}</p>
+              <div className="rounded-2xl border border-[#e8d9cc] bg-white p-5">
+                <div className="mb-4 flex items-center justify-between">
+                  <div>
+                    <h2 className="font-playfair font-semibold text-[#3c2a15]">Digital Menu Management</h2>
+                    <p className="mt-1 font-lato text-sm text-[#7a5838]">
+                      Add items or update prices, images, descriptions, and stock.
+                    </p>
+                  </div>
+                  <button
+                    onClick={resetDraft}
+                    className="flex items-center gap-2 rounded-full bg-[#8d5930] px-4 py-2 font-lato text-sm font-medium text-[#fdf8f3] transition-colors hover:bg-[#744728]"
+                  >
+                    <Plus className="h-4 w-4" />
+                    New Item
+                  </button>
+                </div>
+
+                <div className="grid gap-3 md:grid-cols-2">
+                  <input
+                    value={draftItem.name}
+                    onChange={(event) => setDraftItem({ ...draftItem, name: event.target.value })}
+                    placeholder="Item name"
+                    className="rounded-xl border border-[#e8d9cc] bg-[#fdf8f3] px-4 py-3 text-sm focus:border-[#8d5930] focus:outline-none"
+                  />
+                  <input
+                    value={draftItem.image}
+                    onChange={(event) => setDraftItem({ ...draftItem, image: event.target.value })}
+                    placeholder="Image URL"
+                    className="rounded-xl border border-[#e8d9cc] bg-[#fdf8f3] px-4 py-3 text-sm focus:border-[#8d5930] focus:outline-none"
+                  />
+                  <input
+                    value={draftItem.category}
+                    onChange={(event) => setDraftItem({ ...draftItem, category: event.target.value })}
+                    placeholder="Category"
+                    className="rounded-xl border border-[#e8d9cc] bg-[#fdf8f3] px-4 py-3 text-sm focus:border-[#8d5930] focus:outline-none"
+                  />
+                  <div className="grid grid-cols-2 gap-3">
+                    <input
+                      type="number"
+                      value={draftItem.price}
+                      onChange={(event) =>
+                        setDraftItem({ ...draftItem, price: Number(event.target.value) })
+                      }
+                      placeholder="Price"
+                      className="rounded-xl border border-[#e8d9cc] bg-[#fdf8f3] px-4 py-3 text-sm focus:border-[#8d5930] focus:outline-none"
+                    />
+                    <input
+                      type="number"
+                      value={draftItem.stockQuantity}
+                      onChange={(event) =>
+                        setDraftItem({ ...draftItem, stockQuantity: Number(event.target.value) })
+                      }
+                      placeholder="Stock"
+                      className="rounded-xl border border-[#e8d9cc] bg-[#fdf8f3] px-4 py-3 text-sm focus:border-[#8d5930] focus:outline-none"
+                    />
+                  </div>
+                  <textarea
+                    value={draftItem.description}
+                    onChange={(event) =>
+                      setDraftItem({ ...draftItem, description: event.target.value })
+                    }
+                    rows={3}
+                    placeholder="Description"
+                    className="md:col-span-2 rounded-xl border border-[#e8d9cc] bg-[#fdf8f3] px-4 py-3 text-sm focus:border-[#8d5930] focus:outline-none"
+                  />
+                </div>
+
+                <div className="mt-4 flex gap-3">
+                  <button
+                    onClick={saveMenuItem}
+                    className="rounded-xl bg-[#8d5930] px-4 py-2.5 font-lato text-sm font-medium text-[#fdf8f3] transition-colors hover:bg-[#744728]"
+                  >
+                    {editingItemId ? 'Save Item' : 'Add Item'}
+                  </button>
+                  {editingItemId && (
+                    <button
+                      onClick={resetDraft}
+                      className="rounded-xl border border-[#c8a87a] px-4 py-2.5 font-lato text-sm font-medium text-[#8d5930] transition-colors hover:bg-[#f9edd9]"
+                    >
+                      Cancel
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                {menu.map((item) => (
+                  <div key={item.id} className="overflow-hidden rounded-2xl border border-[#e8d9cc] bg-white">
+                    <div className="relative h-36 overflow-hidden">
+                      <img src={item.image} alt={item.name} className="h-full w-full object-cover" />
+                      <div className="absolute bottom-3 right-3">
+                        <StockBadge status={getStockStatus(item.stockQuantity)} />
+                      </div>
+                    </div>
+                    <div className="p-4">
+                      <div className="mb-1 flex items-start justify-between gap-3">
+                        <p className="font-lato text-sm font-semibold text-[#3c2a15]">{item.name}</p>
+                        <span className="font-lato text-sm font-bold text-[#8d5930]">₹{item.price}</span>
+                      </div>
+                      <p className="mb-2 font-lato text-xs text-[#7a5838]">{item.category}</p>
+                      <p className="line-clamp-2 mb-3 font-lato text-xs text-[#7a5838]">{item.description}</p>
+                      <p className="mb-4 font-lato text-xs text-[#7a5838]">
+                        Stock quantity: {item.stockQuantity}
+                      </p>
+                      <div className="flex gap-2">
+                        <button
+                          onClick={() => startEdit(item.id)}
+                          className="flex-1 rounded-lg border border-[#e8d9cc] px-3 py-2 font-lato text-xs text-[#5e3921] transition-colors hover:border-[#8d5930]"
+                        >
+                          Edit
+                        </button>
+                        <button
+                          onClick={() => removeMenuItem(item.id)}
+                          className="flex-1 rounded-lg border border-red-100 px-3 py-2 font-lato text-xs text-red-500 transition-colors hover:bg-red-50"
+                        >
+                          Remove
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {activeView === 'stock' && (
+            <div className="grid gap-6 lg:grid-cols-[minmax(0,1.3fr)_minmax(0,0.7fr)]">
+              <div className="rounded-2xl border border-[#e8d9cc] bg-white">
+                <div className="border-b border-[#f0e6d3] p-5">
+                  <h2 className="font-playfair font-semibold text-[#3c2a15]">Inventory / Stock System</h2>
+                  <p className="mt-1 font-lato text-sm text-[#7a5838]">
+                    Update stock, monitor quantities, and track availability.
+                  </p>
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="w-full font-lato text-sm">
+                    <thead>
+                      <tr className="bg-[#fdf8f3] text-left text-xs uppercase tracking-wide text-[#7a5838]">
+                        <th className="p-4">Item</th>
+                        <th className="p-4">Category</th>
+                        <th className="p-4">Status</th>
+                        <th className="p-4">Quantity</th>
+                        <th className="p-4">Update</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {menu.map((item) => (
+                        <tr key={item.id} className="border-t border-[#f0e6d3]">
+                          <td className="p-4 font-medium text-[#3c2a15]">{item.name}</td>
+                          <td className="p-4 text-[#5e3921]">{item.category}</td>
+                          <td className="p-4">
+                            <StockBadge status={getStockStatus(item.stockQuantity)} />
+                          </td>
+                          <td className="p-4 text-[#5e3921]">{item.stockQuantity}</td>
+                          <td className="p-4">
+                            <input
+                              type="number"
+                              defaultValue={item.stockQuantity}
+                              onBlur={(event) =>
+                                updateStockQuantity(
+                                  item.id,
+                                  Number(event.target.value),
+                                  'Manual admin stock update'
+                                )
+                              }
+                              className="w-24 rounded-lg border border-[#e8d9cc] bg-[#fdf8f3] px-3 py-2 text-xs focus:border-[#8d5930] focus:outline-none"
+                            />
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              <div className="rounded-2xl border border-[#e8d9cc] bg-white p-5">
+                <h2 className="mb-4 font-playfair font-semibold text-[#3c2a15]">Stock History</h2>
+                <div className="space-y-3">
+                  {stockHistory.slice(0, 10).map((entry) => (
+                    <div key={entry.id} className="rounded-xl bg-[#fdf8f3] p-3">
+                      <div className="mb-1 flex items-center justify-between gap-3">
+                        <p className="font-lato text-sm font-medium text-[#3c2a15]">{entry.itemName}</p>
+                        <span
+                          className={`font-lato text-xs font-semibold ${
+                            entry.change >= 0 ? 'text-emerald-600' : 'text-red-500'
+                          }`}
+                        >
+                          {entry.change >= 0 ? '+' : ''}
+                          {entry.change}
+                        </span>
+                      </div>
+                      <p className="font-lato text-xs text-[#7a5838]">{entry.reason}</p>
+                      <p className="mt-1 font-lato text-xs text-[#7a5838]">
+                        {entry.previousQuantity} → {entry.newQuantity}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {activeView === 'reports' && (
+            <div className="space-y-6">
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+                {[reportSummaries.daily, reportSummaries.weekly, reportSummaries.monthly].map((summary) => (
+                  <div key={summary.label} className="rounded-2xl border border-[#e8d9cc] bg-white p-5">
+                    <p className="font-lato text-xs text-[#7a5838]">{summary.label}</p>
+                    <p className="font-playfair text-3xl font-bold text-[#3c2a15]">
+                      ₹{Math.round(summary.revenue).toLocaleString('en-IN')}
+                    </p>
+                    <p className="mt-1 font-lato text-xs text-[#7a5838]">
+                      {summary.orderCount} delivered order{summary.orderCount !== 1 ? 's' : ''}
+                    </p>
                   </div>
                 ))}
               </div>
 
-              <div className="bg-white rounded-2xl p-5 border border-[#e8d9cc]">
-                <h2 className="font-playfair font-semibold text-[#3c2a15] mb-4">Revenue Trend (This Week)</h2>
-                <div className="flex items-end gap-3 h-40">
-                  {adminStats.weeklyRevenue.map((rev, i) => (
-                    <div key={i} className="flex-1 flex flex-col items-center gap-2">
-                      <span className="text-xs text-[#7a5838] font-lato">₹{Math.round(rev / 1000)}k</span>
-                      <div
-                        className={`w-full rounded-t-xl transition-all ${i === 6 ? 'bg-[#8d5930]' : 'bg-[#e8d9cc]'}`}
-                        style={{ height: `${(rev / maxRevenue) * 120}px` }}
-                      />
-                      <span className="text-xs text-[#7a5838] font-lato">{weekDays[i]}</span>
-                    </div>
-                  ))}
+              <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+                <div className="rounded-2xl border border-[#e8d9cc] bg-white p-5">
+                  <h2 className="mb-4 font-playfair font-semibold text-[#3c2a15]">Best Selling Products</h2>
+                  <div className="space-y-3">
+                    {bestSellingProducts.slice(0, 6).map((item) => (
+                      <div key={item.itemId} className="flex items-center justify-between rounded-xl bg-[#fdf8f3] p-3">
+                        <div>
+                          <p className="font-lato text-sm font-medium text-[#3c2a15]">{item.name}</p>
+                          <p className="font-lato text-xs text-[#7a5838]">{item.quantity} units sold</p>
+                        </div>
+                        <p className="font-lato text-sm font-semibold text-[#8d5930]">
+                          ₹{Math.round(item.revenue).toLocaleString('en-IN')}
+                        </p>
+                      </div>
+                    ))}
+                  </div>
                 </div>
-              </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div className="bg-white rounded-2xl p-5 border border-[#e8d9cc]">
-                  <h2 className="font-playfair font-semibold text-[#3c2a15] mb-4">Category Breakdown</h2>
-                  {[
-                    { cat: 'Coffee', pct: 45 },
-                    { cat: 'Snacks', pct: 28 },
-                    { cat: 'Desserts', pct: 17 },
-                    { cat: 'Cold Drinks', pct: 10 },
-                  ].map((item) => (
-                    <div key={item.cat} className="mb-3">
-                      <div className="flex justify-between text-xs font-lato text-[#5e3921] mb-1">
-                        <span>{item.cat}</span><span>{item.pct}%</span>
+                <div className="rounded-2xl border border-[#e8d9cc] bg-white p-5">
+                  <h2 className="mb-4 font-playfair font-semibold text-[#3c2a15]">Low Stock Products</h2>
+                  <div className="space-y-3">
+                    {lowStockItems.map((item) => (
+                      <div key={item.id} className="flex items-center justify-between rounded-xl bg-[#fdf8f3] p-3">
+                        <div>
+                          <p className="font-lato text-sm font-medium text-[#3c2a15]">{item.name}</p>
+                          <p className="font-lato text-xs text-[#7a5838]">{item.category}</p>
+                        </div>
+                        <div className="text-right">
+                          <p className="font-lato text-sm font-semibold text-[#8d5930]">{item.stockQuantity}</p>
+                          <p className="font-lato text-xs text-[#7a5838]">units left</p>
+                        </div>
                       </div>
-                      <div className="h-2 bg-[#f0e6d3] rounded-full overflow-hidden">
-                        <div className="h-full bg-[#8d5930] rounded-full" style={{ width: `${item.pct}%` }} />
-                      </div>
-                    </div>
-                  ))}
-                </div>
-                <div className="bg-white rounded-2xl p-5 border border-[#e8d9cc]">
-                  <h2 className="font-playfair font-semibold text-[#3c2a15] mb-4">Booking Type Split</h2>
-                  {[
-                    { type: 'Table Booking', pct: 58 },
-                    { type: 'Group Booking', pct: 27 },
-                    { type: 'Gaming Session', pct: 15 },
-                  ].map((item) => (
-                    <div key={item.type} className="mb-3">
-                      <div className="flex justify-between text-xs font-lato text-[#5e3921] mb-1">
-                        <span>{item.type}</span><span>{item.pct}%</span>
-                      </div>
-                      <div className="h-2 bg-[#f0e6d3] rounded-full overflow-hidden">
-                        <div className="h-full bg-[#c8802e] rounded-full" style={{ width: `${item.pct}%` }} />
-                      </div>
-                    </div>
-                  ))}
+                    ))}
+                    {lowStockItems.length === 0 && (
+                      <p className="font-lato text-sm text-[#7a5838]">No low stock products right now.</p>
+                    )}
+                  </div>
                 </div>
               </div>
             </div>
           )}
 
+          {activeView === 'reviews' && (
+            <div className="space-y-4">
+              {reviews.map((review) => (
+                <div key={review.id} className="rounded-2xl border border-[#e8d9cc] bg-white p-5">
+                  <div className="mb-2 flex items-start justify-between gap-4">
+                    <div>
+                      <p className="font-lato text-sm font-medium text-[#3c2a15]">{review.name}</p>
+                      <p className="font-lato text-xs text-[#7a5838]">{review.category}</p>
+                    </div>
+                    <span className="font-lato text-xs text-[#8d5930]">{review.rating}/5</span>
+                  </div>
+                  <p className="font-lato text-sm leading-relaxed text-[#5e3921]">{review.comment}</p>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {activeView === 'events' && (
+            <div className="space-y-4">
+              {cafeEvents.map((event) => (
+                <div
+                  key={event.id}
+                  className="flex flex-col gap-4 rounded-2xl border border-[#e8d9cc] bg-white p-5 sm:flex-row sm:items-center"
+                >
+                  <div className="h-16 w-16 overflow-hidden rounded-xl">
+                    <img src={event.image} alt={event.title} className="h-full w-full object-cover" />
+                  </div>
+                  <div className="flex-1">
+                    <div className="mb-1 flex flex-wrap items-center gap-2">
+                      <h3 className="font-lato text-sm font-semibold text-[#3c2a15]">{event.title}</h3>
+                      <span className="rounded-full bg-[#f9edd9] px-2 py-0.5 font-lato text-xs text-[#8d5930]">
+                        {event.category}
+                      </span>
+                    </div>
+                    <p className="font-lato text-xs text-[#7a5838]">
+                      {event.date} · {event.time} · {event.seatsLeft} seats left
+                    </p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
         </main>
       </div>
     </div>
